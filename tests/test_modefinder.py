@@ -1,6 +1,7 @@
 import array
 import math
 import random
+import statistics
 import unittest
 
 import modefinder
@@ -91,6 +92,188 @@ class EmpModeTest(unittest.TestCase):
         with self.assertRaises(TypeError):
             modefinder.emp_mode(["a"] * 100)
 
+
+def beta25_cdf(x):
+    return 1 - (1 - x) ** 6 - 6 * x * (1 - x) ** 5
+
+
+def beta25_quantile(p):
+    lo, hi = 0.0, 1.0
+    for _ in range(100):
+        mid = (lo + hi) / 2
+        if beta25_cdf(mid) < p:
+            lo = mid
+        else:
+            hi = mid
+    return (lo + hi) / 2
+
+
+class ModeFinderTest(unittest.TestCase):
+    PROBS = [0.01, 0.05, 0.10, 0.25, 0.5, 0.75, 0.90, 0.95, 0.99]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.data = beta_sample(100000)
+        cls.fit = modefinder.ModeFinder(cls.data)
+
+    def test_same_fit_as_emp_mode(self):
+        self.assertEqual(self.fit.result, modefinder.emp_mode(self.data))
+        self.assertEqual(self.fit.method, "Bernstein")
+        self.assertIsNone(self.fit.bandwidth)
+        self.assertEqual(self.fit.mode, self.fit.result["mode"])
+        self.assertEqual(self.fit.degree, self.fit.result["degree"])
+        self.assertEqual((self.fit.lower, self.fit.upper), (0.0, 1.0))
+
+    def test_quantiles_invert_cdf(self):
+        qs = self.fit.quantile(self.PROBS)
+        self.assertEqual(qs, sorted(qs))
+        for p, q in zip(self.PROBS, qs):
+            self.assertAlmostEqual(self.fit.cdf(q), p, delta=1e-12)
+        self.assertEqual(self.fit.quantile(0), self.fit.lower)
+        self.assertEqual(self.fit.quantile(1), self.fit.upper)
+
+    def test_quantiles_beta(self):
+        for p, q in zip(self.PROBS, self.fit.quantile(self.PROBS)):
+            self.assertAlmostEqual(q, beta25_quantile(p), delta=0.02)
+
+    def test_quantiles_normal(self):
+        rng = random.Random(2)
+        data = [rng.gauss(5, 2) for _ in range(100000)]
+        fit = modefinder.ModeFinder(data)
+        self.assertLess(fit.lower, min(data))
+        self.assertGreater(fit.upper, max(data))
+        dist = statistics.NormalDist(5, 2)
+        for p, q in zip(self.PROBS, fit.quantile(self.PROBS)):
+            self.assertAlmostEqual(q, dist.inv_cdf(p), delta=0.15)
+
+    def test_cdf_pdf(self):
+        fit = self.fit
+        self.assertEqual(fit.cdf(-0.5), 0.0)
+        self.assertEqual(fit.cdf(1.0), 1.0)
+        self.assertEqual(fit.pdf(-0.5), 0.0)
+        self.assertEqual(fit.pdf(1.5), 0.0)
+        # the density integrates to one (trapezoidal rule)
+        k = 4000
+        ys = fit.pdf([i / k for i in range(k + 1)])
+        self.assertAlmostEqual((sum(ys) - (ys[0] + ys[-1]) / 2) / k, 1.0,
+                               delta=1e-4)
+        # and is emp_mode()'s density curve on the data scale
+        res = modefinder.emp_mode(self.data, smooth_density=True,
+                                  density_points=100)
+        pdf = fit.pdf(res["x"])
+        scale = fit.upper - fit.lower
+        for y, f in zip(res["y"], pdf):
+            self.assertAlmostEqual(f * scale, y, delta=1e-9 * max(1.0, y))
+
+    def test_shifted_support(self):
+        data = [10 * x - 3 for x in self.data[:20000]]
+        fit = modefinder.ModeFinder(data, fix_lower=-3, fix_upper=7)
+        base = modefinder.ModeFinder(self.data[:20000], fix_lower=0,
+                                     fix_upper=1)
+        for q, b in zip(fit.quantile(self.PROBS), base.quantile(self.PROBS)):
+            self.assertAlmostEqual(q, 10 * b - 3, delta=1e-6)
+
+    def test_return_types(self):
+        self.assertIsInstance(self.fit.quantile(0.5), float)
+        self.assertIsInstance(self.fit.quantile((0.1, 0.9)), list)
+        self.assertEqual(self.fit.quantile(array.array("d", [0.1, 0.9])),
+                         self.fit.quantile([0.1, 0.9]))
+        try:
+            import numpy as np
+        except ImportError:
+            return
+        p = np.array([[0.01, 0.05, 0.1], [0.9, 0.95, 0.99]])
+        q = self.fit.quantile(p)
+        self.assertIsInstance(q, np.ndarray)
+        self.assertEqual(q.shape, p.shape)
+        self.assertEqual(q.ravel().tolist(), self.fit.quantile(p.ravel().tolist()))
+        self.assertEqual(self.fit.quantile(np.float32(0.5)),
+                         self.fit.quantile(0.5))
+
+    def test_errors(self):
+        for bad in (-0.1, 1.1, float("nan"), [0.5, 2]):
+            with self.assertRaises(ValueError):
+                self.fit.quantile(bad)
+        with self.assertRaises(TypeError):
+            self.fit.quantile(["a"])
+
+
+
+class KernelModeFinderTest(unittest.TestCase):
+    PROBS = ModeFinderTest.PROBS
+
+    @classmethod
+    def setUpClass(cls):
+        cls.data = beta_sample(100000)
+        cls.fit = modefinder.ModeFinder(cls.data, smooth_option="kernel")
+
+    def test_same_fit_as_emp_mode(self):
+        fit = self.fit
+        self.assertEqual(fit.result,
+                         modefinder.emp_mode(self.data, smooth_option="kernel"))
+        self.assertEqual(fit.method, "kernel")
+        self.assertIsNone(fit.degree)
+        self.assertGreater(fit.bandwidth, 0)
+        self.assertEqual((fit.lower, fit.upper), (-math.inf, math.inf))
+        self.assertEqual(modefinder.ModeFinder(self.data[:5000],
+                                               smooth_option="KERNEL").method,
+                         "kernel")
+
+    def test_quantiles_invert_cdf(self):
+        qs = self.fit.quantile(self.PROBS)
+        self.assertEqual(qs, sorted(qs))
+        for p, q in zip(self.PROBS, qs):
+            self.assertAlmostEqual(self.fit.cdf(q), p, delta=1e-12)
+        self.assertEqual(self.fit.quantile([0, 1]), [-math.inf, math.inf])
+        # tail probabilities keep their precision on both sides
+        for p in (1e-10, 1 - 1e-10):
+            q = self.fit.quantile(p)
+            self.assertAlmostEqual(self.fit.cdf(q), p, delta=1e-15)
+
+    def test_quantiles_beta(self):
+        for p, q in zip(self.PROBS, self.fit.quantile(self.PROBS)):
+            self.assertAlmostEqual(q, beta25_quantile(p), delta=0.01)
+
+    def test_quantiles_normal(self):
+        rng = random.Random(2)
+        data = [rng.gauss(5, 2) for _ in range(100000)]
+        fit = modefinder.ModeFinder(data, smooth_option="kernel")
+        dist = statistics.NormalDist(5, 2)
+        for p, q in zip(self.PROBS, fit.quantile(self.PROBS)):
+            self.assertAlmostEqual(q, dist.inv_cdf(p), delta=0.05)
+
+    def test_cdf_pdf(self):
+        fit = self.fit
+        self.assertEqual(fit.cdf(-math.inf), 0.0)
+        self.assertEqual(fit.cdf(math.inf), 1.0)
+        self.assertEqual(fit.pdf(-2.0), 0.0)
+        # the density integrates to one (trapezoidal rule)
+        a, b, k = -0.5, 1.5, 20000
+        ys = fit.pdf([a + (b - a) * i / k for i in range(k + 1)])
+        self.assertAlmostEqual((sum(ys) - (ys[0] + ys[-1]) / 2) * (b - a) / k,
+                               1.0, delta=1e-6)
+        # and emp_mode()'s density curve linearly interpolates it
+        res = modefinder.emp_mode(self.data, smooth_option="kernel",
+                                  smooth_density=True)
+        top = max(res["y"])
+        for y, f in zip(res["y"], fit.pdf(res["x"])):
+            self.assertAlmostEqual(f, y, delta=1e-3 * top)
+
+    def test_shifted_data(self):
+        # the kernel estimate is equivariant under affine maps of the data
+        data = [10 * x - 3 for x in self.data[:20000]]
+        fit = modefinder.ModeFinder(data, smooth_option="kernel")
+        base = modefinder.ModeFinder(self.data[:20000], smooth_option="kernel")
+        self.assertAlmostEqual(fit.bandwidth, 10 * base.bandwidth, delta=1e-9)
+        for q, b in zip(fit.quantile(self.PROBS), base.quantile(self.PROBS)):
+            self.assertAlmostEqual(q, 10 * b - 3, delta=1e-9)
+
+    def test_errors(self):
+        for bad in (-0.1, 1.1, float("nan"), [0.5, 2]):
+            with self.assertRaises(ValueError):
+                self.fit.quantile(bad)
+        with self.assertRaises(ValueError):
+            modefinder.ModeFinder(self.data, smooth_option="spline")
 
 if __name__ == "__main__":
     unittest.main()

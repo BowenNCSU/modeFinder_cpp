@@ -35,8 +35,17 @@ void mf_lbfgsb(int n, int m, double *x, double *l, double *u, int *nbd,
 
 /* kde.c: R's stats::density() with its default arguments (gaussian kernel,
    bw = "nrd0", cut = 3) evaluated at n_out points.  x must be sorted and
-   finite with nx >= 2.  Returns 0 on success, -1 if out of memory. */
+   finite with nx >= 2.  If bins is not NULL it receives the estimate as the
+   gaussian mixture sum_j w[j] dnorm(x, lo + j (up - lo) / (n - 1), bw) that
+   density() evaluates by FFT, with w malloc'ed and normalized to sum to 1.
+   Returns 0 on success, -1 if out of memory. */
+typedef struct {
+    int n;
+    double lo, up, bw;
+    double *w;
+} mf_kde_bins;
+
 int mf_density(const double *x, int nx, int n_out,
-	       double *out_x, double *out_y);
+	       double *out_x, double *out_y, mf_kde_bins *bins);
 
 #endif /* MF_INTERNAL_H */

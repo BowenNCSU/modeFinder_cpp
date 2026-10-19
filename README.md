@@ -59,7 +59,7 @@ pip install .
 
 I've ported the whole algorithm to plain C99 with no R or Rcpp dependency,
 wrapped it as a Python package, and removed the R package. In
-a clean virtual environment, `pip install .` builds it and all 8 Python
+a clean virtual environment, `pip install .` builds it and all 23 Python
 tests pass. R isn't installed on this machine, so I couldn't compare results
 against the R function directly.
 
@@ -80,6 +80,101 @@ modefinder.emp_mode(data, smooth=False)            # simple empirical
 - **Input:** a list, an `array.array`, or any numpy array. numpy is
   optional.
 - **Speed:** each method takes about 0.1 s on 10⁶ points.
+
+### Quantiles of the smoothed distribution
+
+`ModeFinder` fits a sample once, the same fit as `emp_mode(data)`, and
+caches the smoothed distribution. You can then ask it for any number of
+quantiles without refitting. It supports both smoothing options:
+
+``` python
+fit = modefinder.ModeFinder(data)                         # Bernstein
+fit = modefinder.ModeFinder(data, smooth_option="kernel") # kernel density
+fit.mode                                # == emp_mode(data, ...)["mode"]
+fit.quantile([0.01, 0.05, 0.10, 0.90, 0.95, 0.99])   # P01 ... P99
+fit.quantile(0.5)                       # scalar in, float out
+fit.cdf(x), fit.pdf(x)                  # smoothed CDF and density
+fit.result                              # the emp_mode() dict
+```
+
+- **Bernstein:** the smoothed CDF on the support `[lower, upper]` is
+  F(x) = Σᵢ Fn(i/m) C(m,i) uⁱ(1−u)ᵐ⁻ⁱ, where u = (x − lower)/(upper − lower).
+  Its derivative is the density curve `emp_mode()` returns as `y`. The cache
+  is the m + 1 values Fn(i/m), and `pdf` is `y / (upper − lower)`.
+- **Kernel:** R's `density()` bins the sample onto a regular grid gⱼ (512
+  points by default) and convolves it with a Gaussian kernel. So its curve
+  is the mixture f(x) = Σⱼ wⱼ φ((x − gⱼ)/h)/h, with h = `bw.nrd0(data)`
+  (`fit.bandwidth`), and the CDF is F(x) = Σⱼ wⱼ Φ((x − gⱼ)/h). The cache is
+  the grid weights wⱼ. The support is the whole real line
+  (`fit.lower = -inf`, `fit.upper = inf`), and `emp_mode()`'s `y` is a
+  linear interpolation of `pdf`.
+- **Quantile rule:** `quantile(p)` returns inf{x : F(x) ≥ p}, solved by
+  Newton's method with a bisection safeguard to about machine precision.
+  Above the median the kernel method solves on 1 − F, so P99.99… keeps its
+  precision. `quantile(0)` and `quantile(1)` are `lower` and `upper`.
+- **Cost:** the sample isn't kept. A quantile costs O(m) or O(grid size).
+  P01–P99 together take about 0.1 ms (Bernstein) or 0.6 ms (kernel).
+- **Input and output types:** `quantile`, `cdf` and `pdf` accept a scalar, a
+  sequence or a numpy array, and return a float, a list or an array of the
+  same shape.
+- **Tails:** smoothing widens the distribution slightly, so tail quantiles
+  sit a little outside the sample quantiles. On 10⁵ standard-normal points,
+  P99 is about 2.38 (Bernstein) or 2.34 (kernel), against 2.33. For
+  Bernstein, pass a larger `m_degree` for a tighter fit. The kernel spills
+  mass past a hard boundary: for Beta(2,5), its P01 is 0.023 against 0.026.
+
+#### Calling the Bernstein or kernel quantiles
+
+The `smooth_option` argument to `ModeFinder` picks the method when you fit.
+After that, the same `quantile()` call works for either:
+
+``` python
+import modefinder
+
+# Bernstein (the default)
+bern = modefinder.ModeFinder(data)
+bern.quantile([0.01, 0.05, 0.10, 0.90, 0.95, 0.99])
+
+# Kernel
+kern = modefinder.ModeFinder(data, smooth_option="kernel")
+kern.quantile([0.01, 0.05, 0.10, 0.90, 0.95, 0.99])
+```
+
+- **Checking which you have:** `fit.method` is `"Bernstein"` or
+  `"kernel"`. `repr(fit)` shows it as well.
+- **Switching methods:** make a second object. Each one fits the data once
+  and keeps only its own fitted curve, so the two can be used side by side.
+- **Other arguments:** they're the same as `emp_mode()`. `m_degree`,
+  `fix_lower`, `fix_upper` and `sample_size` only affect Bernstein;
+  `density_points` sets the kernel's grid size.
+- **Accepted input:** `quantile`, `cdf` and `pdf` take a single number, a
+  list or a numpy array for both methods.
+
+From C, run `mf_emp_mode()` with the option you want, then call the
+matching function on the result:
+
+``` c
+mf_options opt;
+mf_result res;
+mf_default_options(&opt);                     /* Bernstein */
+mf_emp_mode(data, n, &opt, &res);
+double q = mf_bern_quantile(res.bern_fn, res.degree, res.lower, res.upper, 0.95);
+mf_result_free(&res);
+
+opt.smooth_option = MF_SMOOTH_KERNEL;         /* kernel */
+mf_emp_mode(data, n, &opt, &res);
+q = mf_kernel_quantile(res.kde_w, res.kde_n, res.kde_lo, res.kde_up,
+                       res.bandwidth, 0.95);
+mf_result_free(&res);
+```
+
+- **Bernstein functions:** `mf_bern_quantile()`, `mf_bern_cdf()` and
+  `mf_bern_pdf()` take `res.bern_fn`, `res.degree`, `res.lower` and
+  `res.upper`.
+- **Kernel functions:** `mf_kernel_quantile()`, `mf_kernel_cdf()` and
+  `mf_kernel_pdf()` take `res.kde_w`, `res.kde_n`, `res.kde_lo`,
+  `res.kde_up` and `res.bandwidth`.
+- **Example:** `examples/example.c` does both and prints P01–P99 for each.
 
 ### Using it from C
 

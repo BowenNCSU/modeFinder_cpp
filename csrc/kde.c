@@ -142,7 +142,7 @@ static double approx1(double v, const double *x, const double *y, int n)
 }
 
 int mf_density(const double *x, int nx, int n_out,
-	       double *out_x, double *out_y)
+	       double *out_x, double *out_y, mf_kde_bins *bins)
 {
     int n = 512, len, i, ix;
     double bw, from, to, lo, up, xdelta, xpos, fx, wi, re, im;
@@ -179,6 +179,21 @@ int mf_density(const double *x, int nx, int n_out,
 	}
 	else if (ix == -1) yr[0] += fx * wi;
 	else if (ix == n - 1) yr[ix] += (1 - fx) * wi;
+    }
+
+    if (bins) {
+	double sum = 0.;
+	bins->w = (double *) malloc((size_t) n * sizeof(double));
+	if (!bins->w) {
+	    free(buf);
+	    return -1;
+	}
+	for (i = 0; i < n; i++) sum += yr[i];
+	for (i = 0; i < n; i++) bins->w[i] = yr[i] / sum;
+	bins->n = n;
+	bins->lo = lo;
+	bins->up = up;
+	bins->bw = bw;
     }
 
     /* kords <- seq.int(0, (2n-1)/(n-1) * (up-lo), length.out = 2n),

@@ -70,9 +70,26 @@ typedef struct {
     double prob_mid;     /* empirical mass within 1/m of max_point */
     double prob_left;    /* empirical mass of [0, 2/m] */
     double prob_right;   /* empirical mass of (1 - 2/m, 1] */
+    double lower;        /* support [lower, upper] the data were rescaled to */
+    double upper;
+    /* Fn(i / m), i = 0..degree: the empirical CDF of the rescaled data that
+       defines the Bernstein smoothed distribution (see mf_bern_cdf());
+       freed by mf_result_free() */
+    double *bern_fn;
 
     /* MF_METHOD_EMPIRICAL */
     int knots;
+
+    /* MF_METHOD_KERNEL: R's density() estimate is the gaussian mixture
+         f(x) = sum_{j=0}^{kde_n-1} kde_w[j] * dnorm(x, g_j, bandwidth),
+         g_j = kde_lo + j * (kde_up - kde_lo) / (kde_n - 1),
+       of the linearly binned sample (see mf_kernel_cdf()); kde_w sums to 1
+       and is freed by mf_result_free() */
+    double bandwidth;    /* bw.nrd0() of the sample */
+    int kde_n;
+    double kde_lo;
+    double kde_up;
+    double *kde_w;
 
     /* Density curve (smooth && smooth_density), freed by mf_result_free() */
     int n_density;
@@ -92,6 +109,31 @@ int mf_emp_mode(const double *data, size_t n, const mf_options *opt,
 		mf_result *res);
 
 void mf_result_free(mf_result *res);
+
+/* The Bernstein smoothed distribution of a MF_METHOD_BERNSTEIN result,
+   given fn = res.bern_fn, m = res.degree, lower = res.lower and
+   upper = res.upper.  With u = (x - lower) / (upper - lower), its CDF is
+     F(x) = sum_{i=0}^{m} fn[i] * choose(m, i) * u^i * (1 - u)^(m - i).
+   mf_bern_pdf() is its density in the units of x, and mf_bern_quantile()
+   returns inf{x : F(x) >= p} for p in [0, 1] (NaN for other p). */
+double mf_bern_cdf(const double *fn, int m, double lower, double upper,
+		   double x);
+double mf_bern_pdf(const double *fn, int m, double lower, double upper,
+		   double x);
+double mf_bern_quantile(const double *fn, int m, double lower, double upper,
+			double p);
+
+/* The kernel smoothed distribution of a MF_METHOD_KERNEL result, given
+   w = res.kde_w, nw = res.kde_n, lo = res.kde_lo, up = res.kde_up and
+   bw = res.bandwidth: the CDF F(x) = sum_j w[j] * pnorm(x, g_j, bw), its
+   density, and the quantile inf{x : F(x) >= p} for p in [0, 1] (-Inf for
+   p = 0, Inf for p = 1, NaN for other p). */
+double mf_kernel_cdf(const double *w, int nw, double lo, double up,
+		     double bw, double x);
+double mf_kernel_pdf(const double *w, int nw, double lo, double up,
+		     double bw, double x);
+double mf_kernel_quantile(const double *w, int nw, double lo, double up,
+			  double bw, double p);
 
 const char *mf_strerror(int code);
 

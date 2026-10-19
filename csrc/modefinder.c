@@ -129,10 +129,16 @@ static int mode2(const double *data, int n, int smooth_density,
                  int density_points, mf_result *res){
   double *x = (double *) malloc(density_points * sizeof(double));
   double *y = (double *) malloc(density_points * sizeof(double));
-  if(!x || !y || mf_density(data, n, density_points, x, y) != 0){
+  mf_kde_bins bins;
+  if(!x || !y || mf_density(data, n, density_points, x, y, &bins) != 0){
     free(x); free(y);
     return MF_ERR_NOMEM;
   }
+  res->bandwidth = bins.bw;
+  res->kde_n = bins.n;
+  res->kde_lo = bins.lo;
+  res->kde_up = bins.up;
+  res->kde_w = bins.w;
   double max_y = y[0];
   double max_x = x[0];
   for(int i = 0; i < density_points; i++){
@@ -761,6 +767,24 @@ static int emp_mode_bern(double *data, int n, double lower, double upper,
   res->prob_mid = prob_mid;
   res->prob_left = prob_left;
   res->prob_right = prob_right;
+  res->lower = lower;
+  res->upper = upper;
+
+  // Fn(i / m), i = 0..m: everything the smoothed distribution depends on
+  double *bern_fn = (double *) malloc((m + 1) * sizeof(double));
+  if(!bern_fn){
+    status = MF_ERR_NOMEM;
+    goto done;
+  }
+  cum_index = 0;
+  for(int i = 0; i < (m + 1); i++){
+    double criterion = i / (double) m;
+    while(cum_index < n && data[cum_index] <= criterion){
+      cum_index ++ ;
+    }
+    bern_fn[i] = cum_index / (double) n;
+  }
+  res->bern_fn = bern_fn;
 
   if(opt->smooth_density){
     int n_points = opt->density_points;
@@ -819,6 +843,8 @@ int mf_emp_mode(const double *data_in, size_t n_in, const mf_options *opt,
   memset(res, 0, sizeof *res);
   res->alpha = res->p_value = NAN;
   res->max_point = res->prob_mid = res->prob_left = res->prob_right = NAN;
+  res->lower = res->upper = NAN;
+  res->bandwidth = res->kde_lo = res->kde_up = NAN;
   if(!opt){
     mf_default_options(&defaults);
     opt = &defaults;
@@ -880,8 +906,197 @@ void mf_result_free(mf_result *res){
   if(!res) return;
   free(res->density_x);
   free(res->density_y);
-  res->density_x = res->density_y = NULL;
+  free(res->bern_fn);
+  free(res->kde_w);
+  res->density_x = res->density_y = res->bern_fn = res->kde_w = NULL;
   res->n_density = 0;
+}
+
+/* Bernstein CDF F(u) = sum_i fn[i] b(i; m, u) and, if pdf is not NULL, its
+   density f(u) = m sum_i (fn[i + 1] - fn[i]) b(i; m - 1, u) on the [0, 1]
+   scale, for 0 < u < 1.  The basis b is accumulated on the log scale, as in
+   mix_cdf_c() and mix_pdf_c(). */
+static void bern_eval(const double *fn, int m, double u, double *cdf,
+                      double *pdf){
+  double log_ratio = log(u / (1 - u));
+  double dbeta_log = m * log1p(-u);
+  double dbeta_log_1 = log(m) + (m - 1) * log1p(-u);
+  double sum_cdf = fn[0] * exp(dbeta_log);
+  double sum_pdf = 0;
+  for(int i = 1; i < (m + 1); i++){
+    dbeta_log += log((m - i + 1) / (double) i) + log_ratio;
+    sum_cdf += fn[i] * exp(dbeta_log);
+  }
+  if(pdf){
+    for(int i = 0; i < m; i++){
+      if(i > 0){
+        dbeta_log_1 += log((m - i) / (double) i) + log_ratio;
+      }
+      sum_pdf += (fn[i + 1] - fn[i]) * exp(dbeta_log_1);
+    }
+    *pdf = sum_pdf;
+  }
+  *cdf = sum_cdf > 1 ? 1 : sum_cdf;
+}
+
+double mf_bern_cdf(const double *fn, int m, double lower, double upper,
+                   double x){
+  if(isnan(x)) return NAN;
+  if(x < lower) return 0;
+  if(x >= upper) return 1;
+  double u = (x - lower) / (upper - lower);
+  if(u <= 0) return fn[0];
+  double cdf;
+  bern_eval(fn, m, u, &cdf, NULL);
+  return cdf;
+}
+
+double mf_bern_pdf(const double *fn, int m, double lower, double upper,
+                   double x){
+  if(isnan(x)) return NAN;
+  if(x < lower || x > upper) return 0;
+  double u = (x - lower) / (upper - lower);
+  double cdf, pdf;
+  if(u <= 0){
+    pdf = m * (fn[1] - fn[0]);
+  }else if(u >= 1){
+    pdf = m * (fn[m] - fn[m - 1]);
+  }else{
+    bern_eval(fn, m, u, &cdf, &pdf);
+  }
+  return pdf / (upper - lower);
+}
+
+double mf_bern_quantile(const double *fn, int m, double lower, double upper,
+                        double p){
+  if(!(p >= 0 && p <= 1)) return NAN;
+  if(p <= fn[0]) return lower;
+  if(p >= fn[m]) return upper;
+
+  // F(i / m) is close to fn[i]: interpolate fn for the starting point
+  int lo_i = 0, hi_i = m;     // fn[lo_i] < p <= fn[hi_i]
+  while(hi_i - lo_i > 1){
+    int mid = lo_i + (hi_i - lo_i) / 2;
+    if(fn[mid] < p) lo_i = mid; else hi_i = mid;
+  }
+  double u = (lo_i + (p - fn[lo_i]) / (fn[hi_i] - fn[lo_i])) / m;
+  if(!(u > 0 && u < 1)) u = 0.5;
+
+  // F is strictly increasing on (0, 1): Newton's method, falling back to
+  // bisection whenever a step leaves the bracket [lo, hi] around the root
+  double lo = 0, hi = 1;
+  for(int iter = 0; iter < 100; iter++){
+    double cdf, pdf;
+    bern_eval(fn, m, u, &cdf, &pdf);
+    double g = cdf - p;
+    if(g == 0) break;
+    if(g < 0) lo = u; else hi = u;
+    double next = u - g / pdf;
+    if(!(next > lo && next < hi)) next = 0.5 * (lo + hi);
+    double step = fabs(next - u);
+    u = next;
+    if(step <= 4 * DBL_EPSILON * u || hi - lo <= 4 * DBL_EPSILON * u) break;
+  }
+  return lower + u * (upper - lower);
+}
+
+#define MF_SQRT1_2    0.707106781186547524400844362105
+#define MF_1_SQRT_2PI 0.398942280401432677939946059934
+
+/* The gaussian mixture of mf_kernel_cdf() at x: its CDF F(x), or 1 - F(x)
+   if upper_tail (so that upper quantiles do not lose precision), and, if
+   pdf is not NULL, its density. */
+static void kernel_eval(const double *w, int nw, double lo, double up,
+                        double bw, double x, int upper_tail, double *tail,
+                        double *pdf){
+  double dx = (up - lo) / (nw - 1);
+  double sum_tail = 0, sum_pdf = 0;
+  for(int j = 0; j < nw; j++){
+    if(w[j] == 0) continue;
+    double z = (x - (lo + j * dx)) / bw;
+    sum_tail += w[j] * 0.5 * erfc((upper_tail ? z : -z) * MF_SQRT1_2);
+    if(pdf) sum_pdf += w[j] * exp(-0.5 * z * z);
+  }
+  *tail = sum_tail > 1 ? 1 : sum_tail;
+  if(pdf) *pdf = sum_pdf * MF_1_SQRT_2PI / bw;
+}
+
+double mf_kernel_cdf(const double *w, int nw, double lo, double up,
+                     double bw, double x){
+  if(isnan(x)) return NAN;
+  double cdf;
+  kernel_eval(w, nw, lo, up, bw, x, 0, &cdf, NULL);
+  return cdf;
+}
+
+double mf_kernel_pdf(const double *w, int nw, double lo, double up,
+                     double bw, double x){
+  if(isnan(x)) return NAN;
+  double cdf, pdf;
+  kernel_eval(w, nw, lo, up, bw, x, 0, &cdf, &pdf);
+  return pdf;
+}
+
+/* g(x) = F(x) - target, or target - (1 - F(x)) if upper_tail: increasing,
+   with derivative *pdf (if not NULL) */
+static double kernel_g(const double *w, int nw, double lo, double up,
+                       double bw, double x, int upper_tail, double target,
+                       double *pdf){
+  double tail;
+  kernel_eval(w, nw, lo, up, bw, x, upper_tail, &tail, pdf);
+  return upper_tail ? target - tail : tail - target;
+}
+
+double mf_kernel_quantile(const double *w, int nw, double lo, double up,
+                          double bw, double p){
+  if(!(p >= 0 && p <= 1)) return NAN;
+  if(p == 0) return -INFINITY;
+  if(p == 1) return INFINITY;
+
+  // above the median work with the upper tail 1 - F, where 1 - p is exact
+  int upper_tail = p > 0.5;
+  double target = upper_tail ? 1 - p : p;
+
+  // start at the bin where the cumulative weight reaches p
+  double dx = (up - lo) / (nw - 1), cum = 0;
+  int j;
+  for(j = 0; j < nw - 1; j++){
+    cum += w[j];
+    if(cum >= p) break;
+  }
+  double x = lo + j * dx;
+
+  // bracket the root, g(a) < 0 <= g(b), stepping out from x
+  double a = x, b = x, step = bw;
+  for(int k = 0; k < 200 &&
+        kernel_g(w, nw, lo, up, bw, a, upper_tail, target, NULL) >= 0; k++){
+    b = a;
+    a -= step;
+    step *= 2;
+  }
+  step = bw;
+  for(int k = 0; k < 200 &&
+        kernel_g(w, nw, lo, up, bw, b, upper_tail, target, NULL) < 0; k++){
+    a = b;
+    b += step;
+    step *= 2;
+  }
+
+  // Newton's method, falling back to bisection outside the bracket
+  if(!(x > a && x < b)) x = 0.5 * (a + b);
+  for(int iter = 0; iter < 100; iter++){
+    double pdf;
+    double g = kernel_g(w, nw, lo, up, bw, x, upper_tail, target, &pdf);
+    if(g == 0) break;
+    if(g < 0) a = x; else b = x;
+    double next = x - g / pdf;
+    if(!(next > a && next < b)) next = 0.5 * (a + b);
+    double tol = 4 * DBL_EPSILON * (fabs(next) + bw);
+    step = fabs(next - x);
+    x = next;
+    if(step <= tol || b - a <= tol) break;
+  }
+  return x;
 }
 
 const char *mf_strerror(int code){

@@ -5,7 +5,12 @@
  *             smooth_density, density_points, m_degree, sample_size,
  *             m_knots) -> dict
  *
- * which modefinder.emp_mode() wraps.  data may be any object exporting a
+ * which modefinder.emp_mode() wraps, and
+ *
+ *   _smooth(method, kind, coef, lower, upper, bandwidth, values) -> list
+ *
+ * which modefinder.ModeFinder uses for its cdf, pdf and quantiles.  data
+ * may be any object exporting a
  * contiguous float64 buffer (numpy array, array.array('d'), ...) or any
  * sequence of numbers.
  */
@@ -105,10 +110,23 @@ static PyObject *result_to_dict(const mf_result *r)
             set_item(d, "max_point", PyFloat_FromDouble(r->max_point)) < 0 ||
             set_item(d, "prob_mid", PyFloat_FromDouble(r->prob_mid)) < 0 ||
             set_item(d, "prob_left", PyFloat_FromDouble(r->prob_left)) < 0 ||
-            set_item(d, "prob_right", PyFloat_FromDouble(r->prob_right)) < 0)
+            set_item(d, "prob_right", PyFloat_FromDouble(r->prob_right)) < 0 ||
+            set_item(d, "lower", PyFloat_FromDouble(r->lower)) < 0 ||
+            set_item(d, "upper", PyFloat_FromDouble(r->upper)) < 0 ||
+            set_item(d, "bern_fn", PyBytes_FromStringAndSize(
+                         (const char *) r->bern_fn,
+                         (Py_ssize_t) (r->degree + 1) * sizeof(double))) < 0)
             goto fail;
     } else if (r->method == MF_METHOD_EMPIRICAL) {
         if (set_item(d, "knots", PyLong_FromLong(r->knots)) < 0)
+            goto fail;
+    } else if (r->method == MF_METHOD_KERNEL) {
+        if (set_item(d, "bandwidth", PyFloat_FromDouble(r->bandwidth)) < 0 ||
+            set_item(d, "kde_lo", PyFloat_FromDouble(r->kde_lo)) < 0 ||
+            set_item(d, "kde_up", PyFloat_FromDouble(r->kde_up)) < 0 ||
+            set_item(d, "kde_w", PyBytes_FromStringAndSize(
+                         (const char *) r->kde_w,
+                         (Py_ssize_t) r->kde_n * sizeof(double))) < 0)
             goto fail;
     }
 
@@ -223,10 +241,85 @@ static PyObject *py_emp_mode(PyObject *self, PyObject *args, PyObject *kwds)
     return out;
 }
 
+/* _smooth(method, kind, coef, lower, upper, bandwidth, values) -> list:
+   the smoothed "cdf", "pdf" or "quantile" at each of values.  For method
+   "Bernstein", coef, lower and upper are the bern_fn, lower and upper that
+   _emp_mode() returned (bandwidth is unused); for "kernel" they are kde_w,
+   kde_lo and kde_up. */
+static PyObject *py_smooth(PyObject *self, PyObject *args)
+{
+    const char *method, *kind;
+    Py_buffer coef;
+    double lower, upper, bw;
+    PyObject *values_obj;
+    int bern, k;
+    (void) self;
+
+    if (!PyArg_ParseTuple(args, "ssy*dddO", &method, &kind, &coef, &lower,
+                          &upper, &bw, &values_obj))
+        return NULL;
+    bern = strcmp(method, "Bernstein") == 0;
+    if (strcmp(kind, "cdf") == 0) k = 0;
+    else if (strcmp(kind, "pdf") == 0) k = 1;
+    else if (strcmp(kind, "quantile") == 0) k = 2;
+    else k = -1;
+    int nc = (int) (coef.len / (Py_ssize_t) sizeof(double));
+    if (k < 0 || (!bern && strcmp(method, "kernel") != 0)) {
+        PyBuffer_Release(&coef);
+        PyErr_SetString(PyExc_ValueError, "invalid method or kind");
+        return NULL;
+    }
+    if (nc < 2 || coef.len % sizeof(double) != 0 || !(upper > lower) ||
+        (!bern && !(bw > 0))) {
+        PyBuffer_Release(&coef);
+        PyErr_SetString(PyExc_ValueError, "invalid smoothing coefficients");
+        return NULL;
+    }
+
+    Py_ssize_t n;
+    double *x = as_doubles(values_obj, &n);
+    if (!x) {
+        PyBuffer_Release(&coef);
+        return NULL;
+    }
+    if (k == 2) {
+        for (Py_ssize_t i = 0; i < n; i++) {
+            if (!(x[i] >= 0 && x[i] <= 1)) {
+                PyBuffer_Release(&coef);
+                PyMem_Free(x);
+                PyErr_SetString(PyExc_ValueError,
+                                "probabilities must be in [0, 1]");
+                return NULL;
+            }
+        }
+    }
+
+    const double *c = (const double *) coef.buf;
+    Py_BEGIN_ALLOW_THREADS
+    for (Py_ssize_t i = 0; i < n; i++) {
+        if (bern)
+            x[i] = k == 0 ? mf_bern_cdf(c, nc - 1, lower, upper, x[i])
+                 : k == 1 ? mf_bern_pdf(c, nc - 1, lower, upper, x[i])
+                 : mf_bern_quantile(c, nc - 1, lower, upper, x[i]);
+        else
+            x[i] = k == 0 ? mf_kernel_cdf(c, nc, lower, upper, bw, x[i])
+                 : k == 1 ? mf_kernel_pdf(c, nc, lower, upper, bw, x[i])
+                 : mf_kernel_quantile(c, nc, lower, upper, bw, x[i]);
+    }
+    Py_END_ALLOW_THREADS
+    PyBuffer_Release(&coef);
+
+    PyObject *out = doubles_to_list(x, (int) n);
+    PyMem_Free(x);
+    return out;
+}
+
 static PyMethodDef methods[] = {
     {"_emp_mode", (PyCFunction)(void (*)(void)) py_emp_mode,
      METH_VARARGS | METH_KEYWORDS,
      "Low-level mode estimator; use modefinder.emp_mode() instead."},
+    {"_smooth", py_smooth, METH_VARARGS,
+     "Low-level smoothed cdf/pdf/quantile; use modefinder.ModeFinder."},
     {NULL, NULL, 0, NULL}
 };
 
