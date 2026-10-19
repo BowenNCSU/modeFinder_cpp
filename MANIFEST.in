@@ -1,0 +1,5 @@
+include csrc/*.c csrc/*.h
+include modefinder/*.c
+include tests/*.py
+include Makefile
+include examples/*.c
