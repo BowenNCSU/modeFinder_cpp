@@ -1,0 +1,18 @@
+{
+  "run": "simulations/stock_mode_quantile/results/run_20261019_top3_2000",
+  "data": "/Users/bowenliu/Downloads/data/5 min",
+  "cost_bps": 2.0,
+  "step": 1,
+  "tickers": 2000,
+  "horizon_days": 20,
+  "min_cover": 0.2,
+  "trading_days": 109,
+  "first_day": 20260513,
+  "mid_day": 20260731,
+  "last_day": 20261016,
+  "train_rows": 67761,
+  "test_rows": 69873,
+  "rules_searched": 3272,
+  "check_max_gap": 0.0,
+  "run_seconds": 21.9
+}

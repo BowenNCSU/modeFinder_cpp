@@ -181,12 +181,12 @@ def ffill(a):
     return a[idx]
 
 
-def rolling_quantiles(values, step):
-    """q[t] = the fitted (BUY_Q, SELL_Q) quantiles of values[t-WINDOW+1 .. t],
+def rolling_quantiles(values, step, probs=(BUY_Q, SELL_Q)):
+    """q[t] = the fitted probs quantiles of values[t-WINDOW+1 .. t],
     refitted every step bars and carried forward in between (and over
     failed fits)."""
     n = len(values)
-    q = np.full((n, 2), np.nan)
+    q = np.full((n, len(probs)), np.nan)
     for t in range(WINDOW - 1, n, step):
         w = values[t - WINDOW + 1:t + 1]
         if not w.max() > w.min():
@@ -195,7 +195,7 @@ def rolling_quantiles(values, step):
             fit = modefinder.ModeFinder(w, smooth_option=METHOD)
         except (ValueError, ArithmeticError):
             continue
-        q[t] = fit.quantile((BUY_Q, SELL_Q))
+        q[t] = fit.quantile(probs)
     return ffill(q)
 
 

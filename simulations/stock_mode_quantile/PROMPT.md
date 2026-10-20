@@ -2,6 +2,23 @@
 
 The requests this simulation was built for, kept verbatim for future runs.
 
+## Stop rules (2026-10-20)
+
+Run with `stop_rules.py` as `results/run_20261019_top3_2000_stop_rules`.
+
+> use new strategy of q5/q95 on a 20-day window with the kernel method, if historical bars has over 20 days, sell all stock/etf as long as time in market ratio > 50% in last 20 days, also sell all stock as long as price has droped over 6%. try on 3rd round's 2k stocks/etfs and compared with previous strategies' results.
+
+The script reads "over 20 days" as: the time-in-market rule starts once the
+strategy has traded for 20 days, so its 20-day ratio covers a full window.
+It measures the 6% drop from the buy price. After a stop, it does not buy
+again until the close is back above the stop level.
+
+## Threshold study (2026-10-19)
+
+Run with `thresholds.py` as `results/run_20261019_top3_2000_thresholds`.
+
+> for 3rd round simulation on 2k tickers, rerun simulation and calculate daily/hourly skew and time in market ratio based on observed data in each step of simulation. Check what threshold or combination of thresholds can distinguish profitable tickers after using our strategy. Must try threshold skewness > 0 or time in market ratio < 50%. Also try other possible thresholds.
+
 ## Top-3 follow-up (2026-10-19)
 
 Run as `results/run_20261019_top3_2000`. The grid scripts used for the two

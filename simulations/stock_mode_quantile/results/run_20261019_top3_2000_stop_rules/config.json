@@ -1,0 +1,86 @@
+{
+  "run": "simulations/stock_mode_quantile/results/run_20261019_top3_2000",
+  "data": "/Users/bowenliu/Downloads/data/5 min",
+  "cost_bps": 2.0,
+  "step": 1,
+  "tickers": 2000,
+  "window": 1560,
+  "method": "kernel",
+  "fields": [
+    "high",
+    "open",
+    "close"
+  ],
+  "probs": [
+    0.05,
+    0.25,
+    0.9,
+    0.95
+  ],
+  "tim_max": 0.5,
+  "stop": 0.06,
+  "strategies": [
+    {
+      "name": "q05/q95 + tim + stop",
+      "buy": 0,
+      "sell": 3,
+      "tim": 0.5,
+      "stop": 0.06,
+      "rebuy": false
+    },
+    {
+      "name": "q05/q95",
+      "buy": 0,
+      "sell": 3,
+      "tim": null,
+      "stop": null,
+      "rebuy": false
+    },
+    {
+      "name": "q05/q95 + tim",
+      "buy": 0,
+      "sell": 3,
+      "tim": 0.5,
+      "stop": null,
+      "rebuy": false
+    },
+    {
+      "name": "q05/q95 + stop",
+      "buy": 0,
+      "sell": 3,
+      "tim": null,
+      "stop": 0.06,
+      "rebuy": false
+    },
+    {
+      "name": "q05/q95 + tim + stop, rebuy at once",
+      "buy": 0,
+      "sell": 3,
+      "tim": 0.5,
+      "stop": 0.06,
+      "rebuy": true
+    },
+    {
+      "name": "q25/q90 + tim + stop",
+      "buy": 1,
+      "sell": 2,
+      "tim": 0.5,
+      "stop": 0.06,
+      "rebuy": false
+    },
+    {
+      "name": "q25/q90",
+      "buy": 1,
+      "sell": 2,
+      "tim": null,
+      "stop": null,
+      "rebuy": false
+    }
+  ],
+  "trading_days": 109,
+  "first_day": 20260513,
+  "mid_day": 20260731,
+  "last_day": 20261016,
+  "check_max_gap": 0.0,
+  "run_seconds": 2095.4
+}

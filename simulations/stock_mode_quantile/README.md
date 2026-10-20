@@ -22,6 +22,21 @@ tickers by profit.
   backtests the three combinations and buy and hold, and writes the CSV
   files and the report.
 - `report.py` rebuilds `report.md` from a run's CSV files.
+- `thresholds.py` reruns a finished run's tickers and tests thresholds on
+  features observed at each step (daily and hourly skew, time in market,
+  momentum, volatility and others). It looks for thresholds that pick out
+  the tickers the strategy goes on to profit from. The rolling fits are
+  cached in `<out>/cache`, about 1 GB for 2,000 tickers and ignored by git,
+  so a rerun only redoes the analysis.
+- `stop_rules.py` reruns a finished run's tickers with a new strategy:
+  q05/q95 on the same 1560-bar kernel fits, with two extra rules. After 20
+  days of trading, it sells and stays out while it has held the ticker more
+  than 50% of the last 1560 bars. It also sells when the close is more than
+  6% below the buy price. It also backtests each rule on its own and
+  round 3's q25/q90 for comparison. Fits are cached in `<out>/cache`, about
+  2 GB for 2,000 tickers and ignored by git.
+- `STRATEGIES.md` writes the newest strategies as CASE WHEN rules and
+  compares their results.
 - `results/run_<timestamp>/` holds one run's output:
   - `config.json`: the arguments.
   - `selection.csv`: the tickers.
@@ -68,6 +83,30 @@ python simulations/stock_mode_quantile/simulate.py \
       --data "/Users/bowenliu/Downloads/data/5 min" --count 2000 --seed 2028 \
       --out simulations/stock_mode_quantile/results/run_20261019_top3_2000
   ```
+
+- **`results/run_20261019_top3_2000_thresholds`:** thresholds on observed
+  features for the run above:
+
+  ``` sh
+  python simulations/stock_mode_quantile/thresholds.py \
+      --run simulations/stock_mode_quantile/results/run_20261019_top3_2000
+  ```
+
+  It writes `panel.csv.gz` (features and forward returns per ticker and
+  day), `rules.csv` (every rule tried), `rank_ic.csv`, `gated_ticker.csv`,
+  `gated_portfolio.csv` and `report.md`.
+
+- **`results/run_20261019_top3_2000_stop_rules`:** the q05/q95 strategy
+  with the time-in-market cap and the stop loss, on the same tickers:
+
+  ``` sh
+  python simulations/stock_mode_quantile/stop_rules.py \
+      --run simulations/stock_mode_quantile/results/run_20261019_top3_2000
+  ```
+
+  It writes `per_ticker.csv` (each ticker × strategy × field),
+  `ranking.csv` (tickers ranked by the new strategy, next to round 3 and
+  buy and hold), `portfolio.csv` and `report.md`.
 
 The first two runs used the grid version of the scripts, which is kept in
 `results/run_20261019_seed2027/scripts_used/`.
