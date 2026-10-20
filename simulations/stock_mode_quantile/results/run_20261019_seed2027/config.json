@@ -1,0 +1,106 @@
+{
+  "data": "/Users/bowenliu/Downloads/data/5 min",
+  "out": "simulations/stock_mode_quantile/results/run_20261019_seed2027",
+  "stocks": 20,
+  "etfs": 10,
+  "seed": 2027,
+  "tickers": null,
+  "fields": [
+    "open",
+    "close",
+    "high",
+    "low"
+  ],
+  "windows": [
+    78,
+    390,
+    1560
+  ],
+  "methods": [
+    "Bernstein",
+    "kernel"
+  ],
+  "rules": [
+    "mode",
+    "median",
+    "q40/q60",
+    "q25/q75",
+    "q10/q90",
+    "q05/q95",
+    "q01/q99",
+    "q10/q75",
+    "q25/q90"
+  ],
+  "costs_bps": [
+    0.0,
+    2.0
+  ],
+  "step": 1,
+  "pad": 0.1,
+  "horizons": [
+    1,
+    78
+  ],
+  "min_bars": 5000,
+  "min_price": 5.0,
+  "min_dollar_volume": 100000.0,
+  "jobs": 14,
+  "costs": [
+    0.0,
+    0.0002
+  ],
+  "capital": 10000.0,
+  "probs": [
+    0.01,
+    0.05,
+    0.1,
+    0.25,
+    0.4,
+    0.5,
+    0.6,
+    0.75,
+    0.9,
+    0.95,
+    0.99
+  ],
+  "rule_thresholds": {
+    "mode": [
+      "mode",
+      "mode"
+    ],
+    "median": [
+      0.5,
+      0.5
+    ],
+    "q40/q60": [
+      0.4,
+      0.6
+    ],
+    "q25/q75": [
+      0.25,
+      0.75
+    ],
+    "q10/q90": [
+      0.1,
+      0.9
+    ],
+    "q05/q95": [
+      0.05,
+      0.95
+    ],
+    "q01/q99": [
+      0.01,
+      0.99
+    ],
+    "q10/q75": [
+      0.1,
+      0.75
+    ],
+    "q25/q90": [
+      0.25,
+      0.9
+    ]
+  },
+  "run_seconds": 981.5,
+  "modefinder_version": "0.1.0"
+}

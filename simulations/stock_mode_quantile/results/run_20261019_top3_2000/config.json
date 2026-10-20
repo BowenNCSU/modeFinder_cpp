@@ -1,0 +1,29 @@
+{
+  "data": "/Users/bowenliu/Downloads/data/5 min",
+  "out": "simulations/stock_mode_quantile/results/run_20261019_top3_2000",
+  "count": 2000,
+  "seed": 2028,
+  "tickers": null,
+  "cost_bps": 2.0,
+  "step": 1,
+  "min_bars": 5000,
+  "min_price": 5.0,
+  "min_dollar_volume": 100000.0,
+  "jobs": 14,
+  "cost": 0.0002,
+  "capital": 10000.0,
+  "window": 1560,
+  "method": "kernel",
+  "buy_quantile": 0.25,
+  "sell_quantile": 0.9,
+  "fields": [
+    "high",
+    "open",
+    "close"
+  ],
+  "jump_flag": 0.4,
+  "eligible": 2533,
+  "files": 13383,
+  "run_seconds": 1301.5,
+  "modefinder_version": "0.1.0"
+}
