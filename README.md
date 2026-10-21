@@ -59,7 +59,7 @@ pip install .
 
 I've ported the whole algorithm to plain C99 with no R or Rcpp dependency,
 wrapped it as a Python package, and removed the R package. In
-a clean virtual environment, `pip install .` builds it and all 23 Python
+a clean virtual environment, `pip install .` builds it and all 25 Python
 tests pass. R isn't installed on this machine, so I couldn't compare results
 against the R function directly.
 
@@ -80,6 +80,17 @@ modefinder.emp_mode(data, smooth=False)            # simple empirical
 - **Input:** a list, an `array.array`, or any numpy array. numpy is
   optional.
 - **Speed:** each method takes about 0.1 s on 10⁶ points.
+- **Weights (kernel only):** `weights=` takes one finite, nonnegative
+  number per data point. They are divided by their sum and replace the
+  equal 1/n mass each point gets in the kernel estimate, as R's
+  `density(x, weights = w)`. The bandwidth is still `bw.nrd0(data)`,
+  unweighted. `ModeFinder` takes the same argument, and in C it is
+  `mf_options.weights` (NULL for equal weights). Passing weights with
+  Bernstein or `smooth=False` raises `ValueError`.
+
+  ``` python
+  modefinder.emp_mode(prices, smooth_option="kernel", weights=volumes)
+  ```
 
 ### Quantiles of the smoothed distribution
 

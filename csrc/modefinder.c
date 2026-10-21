@@ -125,12 +125,12 @@ static void empirical(const double *data, int n, int knots, double lower,
 //
 //
 
-static int mode2(const double *data, int n, int smooth_density,
+static int mode2(const double *data, const double *wts, int n, int smooth_density,
                  int density_points, mf_result *res){
   double *x = (double *) malloc(density_points * sizeof(double));
   double *y = (double *) malloc(density_points * sizeof(double));
   mf_kde_bins bins;
-  if(!x || !y || mf_density(data, n, density_points, x, y, &bins) != 0){
+  if(!x || !y || mf_density(data, wts, n, density_points, x, y, &bins) != 0){
     free(x); free(y);
     return MF_ERR_NOMEM;
   }
@@ -822,6 +822,11 @@ static int cmp_double(const void *a, const void *b){
   return (x > y) - (x < y);
 }
 
+/* a data point and its weight, sorted together by cmp_double on x */
+typedef struct {
+  double x, w;
+} weighted_point;
+
 void mf_default_options(mf_options *opt){
   memset(opt, 0, sizeof *opt);
   opt->smooth = 1;
@@ -836,7 +841,7 @@ void mf_default_options(mf_options *opt){
 int mf_emp_mode(const double *data_in, size_t n_in, const mf_options *opt,
                 mf_result *res){
   mf_options defaults;
-  double *data, lower, upper;
+  double *data, *wts = NULL, lower, upper;
   int n, status;
 
   if(!data_in || !res) return MF_ERR_BADARG;
@@ -868,13 +873,41 @@ int mf_emp_mode(const double *data_in, size_t n_in, const mf_options *opt,
        (opt->sample_size < 1 || opt->m_degree == 1))
       return MF_ERR_BADARG;
   }
+  if(opt->weights){ // kernel only: finite, nonnegative, positive sum
+    double sum_w = 0;
+    if(!opt->smooth || opt->smooth_option != MF_SMOOTH_KERNEL) return MF_ERR_BADARG;
+    for(int i = 0; i < n; i++){
+      if(!isfinite(opt->weights[i]) || opt->weights[i] < 0) return MF_ERR_BADARG;
+      sum_w += opt->weights[i];
+    }
+    if(!(sum_w > 0) || !isfinite(sum_w)) return MF_ERR_BADARG;
 
-  data = (double *) malloc(n * sizeof(double));
-  if(!data) return MF_ERR_NOMEM;
-  memcpy(data, data_in, n * sizeof(double));
+    // sort the points with their weights, then normalize the weights
+    weighted_point *pts = (weighted_point *) malloc(n * sizeof(weighted_point));
+    data = (double *) malloc(n * sizeof(double));
+    wts = (double *) malloc(n * sizeof(double));
+    if(!pts || !data || !wts){
+      free(pts); free(data); free(wts);
+      return MF_ERR_NOMEM;
+    }
+    for(int i = 0; i < n; i++){
+      pts[i].x = data_in[i];
+      pts[i].w = opt->weights[i];
+    }
+    qsort(pts, n, sizeof(weighted_point), cmp_double);
+    for(int i = 0; i < n; i++){
+      data[i] = pts[i].x;
+      wts[i] = pts[i].w / sum_w;
+    }
+    free(pts);
+  }else{
+    data = (double *) malloc(n * sizeof(double));
+    if(!data) return MF_ERR_NOMEM;
+    memcpy(data, data_in, n * sizeof(double));
+    qsort(data, n, sizeof(double), cmp_double);
+  }
 
   // Calculate the left and right boundary
-  qsort(data, n, sizeof(double), cmp_double);
   double min_data = data[0];
   double max_data = data[n - 1];
   double delta = 1 / (double) n;
@@ -882,6 +915,7 @@ int mf_emp_mode(const double *data_in, size_t n_in, const mf_options *opt,
   upper = opt->has_fix_upper ? opt->fix_upper : (max_data > 1 ? max_data + delta : 1);
   if(!(upper > lower) || !isfinite(lower) || !isfinite(upper)){
     free(data);
+    free(wts);
     return MF_ERR_BADARG;
   }
 
@@ -889,7 +923,7 @@ int mf_emp_mode(const double *data_in, size_t n_in, const mf_options *opt,
     if(opt->smooth_option == MF_SMOOTH_BERNSTEIN){
       status = emp_mode_bern(data, n, lower, upper, opt, res);
     }else{ // Kernel density
-      status = mode2(data, n, opt->smooth_density, opt->density_points, res);
+      status = mode2(data, wts, n, opt->smooth_density, opt->density_points, res);
     }
   }else{ // Empirical approach
     int knots = opt->m_knots <= 0 ? n : opt->m_knots;
@@ -898,6 +932,7 @@ int mf_emp_mode(const double *data_in, size_t n_in, const mf_options *opt,
   }
 
   free(data);
+  free(wts);
   if(status != MF_OK) mf_result_free(res);
   return status;
 }

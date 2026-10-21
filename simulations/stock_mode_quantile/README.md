@@ -37,6 +37,14 @@ tickers by profit.
   2 GB for 2,000 tickers and ignored by git.
 - `STRATEGIES.md` writes the newest strategies as CASE WHEN rules and
   compares their results.
+- `improvements.py` reruns a finished run's tickers over 300 variants:
+  three fits (kernel, kernel weighted by bar volume, and Bernstein with
+  bounds at the window's min and max ± 1/1560), four sell thresholds (q90,
+  q95, q99 and the previous 1560-bar max), five strategies (plain, the two
+  time-in-market entry gates, their OR, and cap + stop) and five filters
+  from the close's Bernstein mode (none, plus a leave-one-day-out band and
+  a two-day trajectory, each read two ways). Fits are cached in
+  `<out>/cache`, ignored by git.
 - `results/run_<timestamp>/` holds one run's output:
   - `config.json`: the arguments.
   - `selection.csv`: the tickers.
@@ -107,6 +115,17 @@ python simulations/stock_mode_quantile/simulate.py \
   It writes `per_ticker.csv` (each ticker × strategy × field),
   `ranking.csv` (tickers ranked by the new strategy, next to round 3 and
   buy and hold), `portfolio.csv` and `report.md`.
+
+- **`results/run_20261019_top3_2000_improvements`:** the 300 variants of
+  `improvements.py` on the same tickers:
+
+  ``` sh
+  python simulations/stock_mode_quantile/improvements.py \
+      --run simulations/stock_mode_quantile/results/run_20261019_top3_2000
+  ```
+
+  It writes `portfolio.csv` (one row per variant), `per_ticker.csv.gz`,
+  `config.json`, `fits.log` and `report.md`.
 
 The first two runs used the grid version of the scripts, which is kept in
 `results/run_20261019_seed2027/scripts_used/`.

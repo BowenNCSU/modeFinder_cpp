@@ -1,0 +1,69 @@
+{
+  "run": "results/run_20261019_top3_2000",
+  "data": "/Users/bowenliu/Downloads/data/5 min",
+  "cost_bps": 2.0,
+  "tickers": 2000,
+  "window": 1560,
+  "fields": [
+    "high",
+    "open",
+    "close"
+  ],
+  "probs": [
+    0.25,
+    0.9,
+    0.95,
+    0.99
+  ],
+  "bernstein_delta": 0.000641025641025641,
+  "sources": {
+    "kernel": "kernel",
+    "kernel_vol": "kernel, volume weights",
+    "bern": "Bernstein"
+  },
+  "sells": [
+    "q90",
+    "q95",
+    "q99",
+    "max"
+  ],
+  "strategies": {
+    "plain": "q25 / sell, no rule",
+    "tim20": "1. tim_20d > 85.3%, entry only",
+    "timall": "2. tim_all < 50%, entry only",
+    "capstop": "3. cap + stop",
+    "either": "new: tim_20d > 85.3% or tim_all < 50%, entry only"
+  },
+  "filters": {
+    "none": "no filter",
+    "band_guard": "band: no buy if falling, no sell if rising",
+    "band_literal": "band: no sell if falling, no buy if rising",
+    "traj_guard": "trajectory: no buy if falling, no sell if rising",
+    "traj_literal": "trajectory: no sell if falling, no buy if rising"
+  },
+  "tim20_min": 0.853,
+  "timall_max": 0.5,
+  "tim_max": 0.5,
+  "stop": 0.06,
+  "jack_q": [
+    0.1,
+    0.9
+  ],
+  "traj_lag": 78,
+  "filter_active": {
+    "band_falling": 0.11026061424950494,
+    "band_rising": 0.10834527251238822,
+    "traj_falling": 0.2474740417447268,
+    "traj_rising": 0.2455648702669746
+  },
+  "check_gaps": {
+    "round3": 0.0,
+    "stop_rules": 0.0
+  },
+  "trading_days": 109,
+  "first_day": 20260513,
+  "mid_day": 20260731,
+  "last_day": 20261016,
+  "modefinder_version": "0.1.0",
+  "run_seconds": 97.7
+}

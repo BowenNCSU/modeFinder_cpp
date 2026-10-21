@@ -18,7 +18,7 @@ __version__ = "0.1.0"
 def emp_mode(data, fix_lower=None, fix_upper=None, smooth=True,
              smooth_option="Bernstein", smooth_density=False,
              density_points=512, m_degree=None, sample_size=1000,
-             m_knots=None, verbose=False):
+             m_knots=None, verbose=False, weights=None):
     """Empirical mode estimate of a univariate sample.
 
     Parameters mirror ``modeFinder::emp_mode()`` in R.
@@ -47,6 +47,12 @@ def emp_mode(data, fix_lower=None, fix_upper=None, smooth=True,
         sample size.
     verbose : bool
         Print the diagnostics the R package prints.
+    weights : sequence of float or float64 array-like, optional
+        Kernel method only: one nonnegative weight per data point.  They are
+        divided by their sum, and each point's gaussian kernel enters the
+        density (and the CDF) with its normalized weight, as R's
+        ``density(data, weights=...)``.  The bandwidth stays
+        ``bw.nrd0(data)``.  Default: equal weights.
 
     Returns
     -------
@@ -60,7 +66,7 @@ def emp_mode(data, fix_lower=None, fix_upper=None, smooth=True,
     """
     raw = _fit(data, fix_lower, fix_upper, smooth, smooth_option,
                smooth_density, density_points, m_degree, sample_size,
-               m_knots, verbose)
+               m_knots, verbose, weights)
     return _public(raw)
 
 
@@ -73,14 +79,15 @@ def _as_float64(data):
 
 
 def _fit(data, fix_lower, fix_upper, smooth, smooth_option, smooth_density,
-         density_points, m_degree, sample_size, m_knots, verbose):
+         density_points, m_degree, sample_size, m_knots, verbose, weights=None):
     """Run the C estimator; returns its raw result dict."""
     option = str(smooth_option).lower()
     if option == "bernstein":
         option = "Bernstein"
     raw = _emp_mode(_as_float64(data), fix_lower, fix_upper, bool(smooth),
                     option, bool(smooth_density), int(density_points),
-                    m_degree, int(sample_size), m_knots)
+                    m_degree, int(sample_size), m_knots,
+                    None if weights is None else _as_float64(weights))
     if verbose and raw["message"]:
         print(raw["message"], end="")
     return raw
@@ -142,7 +149,9 @@ class ModeFinder:
     of the sample linearly binned onto a regular grid g_j (512 points by
     default), with ``bandwidth`` = ``bw.nrd0(data)``.  Its CDF is
     ``F(x) = sum_j w_j * pnorm(x, g_j, bandwidth)`` on the whole real line.
-    The grid weights w_j are cached.
+    The grid weights w_j are cached.  With ``weights``, each data point
+    enters the binning with its normalized weight instead of 1/n (see
+    ``emp_mode()``).
 
     In both cases the sample itself is not kept.  Parameters are those of
     ``emp_mode()`` that apply to the smoothing methods.
@@ -167,10 +176,10 @@ class ModeFinder:
     def __init__(self, data, fix_lower=None, fix_upper=None,
                  smooth_option="Bernstein", smooth_density=False,
                  density_points=512, m_degree=None, sample_size=1000,
-                 verbose=False):
+                 verbose=False, weights=None):
         raw = _fit(data, fix_lower, fix_upper, True, smooth_option,
                    smooth_density, density_points, m_degree, sample_size,
-                   None, verbose)
+                   None, verbose, weights)
         self.result = _public(raw)
         self.method = raw["method"]
         self.mode = raw["mode"]

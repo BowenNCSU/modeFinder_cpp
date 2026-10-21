@@ -55,6 +55,11 @@ typedef struct {
     int m_degree;        /* Bernstein degree; <= 0 chooses it automatically */
     int sample_size;     /* subsample size for the Anderson-Darling test */
     int m_knots;         /* empirical mode knots; <= 0 uses the sample size */
+    /* Kernel method only: NULL for equal weights, else n finite nonnegative
+       weights, one per data point, with a positive sum.  They are divided by
+       their sum, and each point's gaussian kernel enters the density and the
+       CDF with its normalized weight.  The bandwidth stays bw.nrd0(data). */
+    const double *weights;
 } mf_options;
 
 typedef struct {

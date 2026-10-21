@@ -3,7 +3,7 @@
  *
  *   _emp_mode(data, fix_lower, fix_upper, smooth, smooth_option,
  *             smooth_density, density_points, m_degree, sample_size,
- *             m_knots) -> dict
+ *             m_knots, weights) -> dict
  *
  * which modefinder.emp_mode() wraps, and
  *
@@ -177,23 +177,24 @@ static PyObject *py_emp_mode(PyObject *self, PyObject *args, PyObject *kwds)
     static char *kwlist[] = {"data", "fix_lower", "fix_upper", "smooth",
                              "smooth_option", "smooth_density",
                              "density_points", "m_degree", "sample_size",
-                             "m_knots", NULL};
+                             "m_knots", "weights", NULL};
     PyObject *data_obj, *lower_obj = Py_None, *upper_obj = Py_None;
     PyObject *m_degree_obj = Py_None, *m_knots_obj = Py_None;
+    PyObject *weights_obj = Py_None;
     int smooth = 1, smooth_density = 0, density_points = 512, sample_size = 1000;
     const char *smooth_option = "Bernstein";
     mf_options opt;
     mf_result res;
     Py_ssize_t n;
-    double *data;
+    double *data, *weights = NULL;
     int status;
     (void) self;
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|OOpspiOiO", kwlist,
+    if (!PyArg_ParseTupleAndKeywords(args, kwds, "O|OOpspiOiOO", kwlist,
                                      &data_obj, &lower_obj, &upper_obj,
                                      &smooth, &smooth_option, &smooth_density,
                                      &density_points, &m_degree_obj,
-                                     &sample_size, &m_knots_obj))
+                                     &sample_size, &m_knots_obj, &weights_obj))
         return NULL;
 
     mf_default_options(&opt);
@@ -223,11 +224,39 @@ static PyObject *py_emp_mode(PyObject *self, PyObject *args, PyObject *kwds)
 
     data = as_doubles(data_obj, &n);
     if (!data) return NULL;
+    if (weights_obj != Py_None) {
+        Py_ssize_t nw;
+        if (!smooth || opt.smooth_option != MF_SMOOTH_KERNEL) {
+            PyMem_Free(data);
+            PyErr_SetString(PyExc_ValueError,
+                            "weights are only supported by the kernel method");
+            return NULL;
+        }
+        weights = as_doubles(weights_obj, &nw);
+        if (!weights) {
+            PyMem_Free(data);
+            return NULL;
+        }
+        if (nw != n) {
+            PyMem_Free(data);
+            PyMem_Free(weights);
+            PyErr_SetString(PyExc_ValueError,
+                            "weights must have the same length as data");
+            return NULL;
+        }
+        opt.weights = weights;
+    }
 
     Py_BEGIN_ALLOW_THREADS
     status = mf_emp_mode(data, (size_t) n, &opt, &res);
     Py_END_ALLOW_THREADS
     PyMem_Free(data);
+    PyMem_Free(weights);
+    if (status == MF_ERR_BADARG && weights) {
+        PyErr_SetString(PyExc_ValueError, "invalid argument (weights must be "
+                        "finite and nonnegative with a positive sum)");
+        return NULL;
+    }
 
     if (status != MF_OK) {
         if (status == MF_ERR_NOMEM) return PyErr_NoMemory();

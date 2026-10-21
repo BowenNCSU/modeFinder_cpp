@@ -259,6 +259,42 @@ class KernelModeFinderTest(unittest.TestCase):
         for y, f in zip(res["y"], fit.pdf(res["x"])):
             self.assertAlmostEqual(f, y, delta=1e-3 * top)
 
+    def test_weights(self):
+        data = self.data[:20000]
+        base = modefinder.ModeFinder(data, smooth_option="kernel")
+        # equal weights of any scale give the unweighted fit
+        same = modefinder.ModeFinder(data, smooth_option="kernel",
+                                     weights=[3.0] * len(data))
+        self.assertEqual(same.result, base.result)
+        self.assertEqual(same.quantile(self.PROBS), base.quantile(self.PROBS))
+        # weight 0 on the points above 0.3: almost no mass is left there
+        fit = modefinder.ModeFinder(data, smooth_option="kernel",
+                                    weights=[float(x <= 0.3) for x in data])
+        self.assertGreater(fit.cdf(0.3 + 3 * fit.bandwidth), 0.99)
+        self.assertEqual(fit.bandwidth, base.bandwidth)
+        # weight 2 is close to repeating the point (only the bandwidth differs)
+        w = [2.0] * 2000 + [1.0] * (len(data) - 2000)
+        fit = modefinder.ModeFinder(data, smooth_option="kernel", weights=w)
+        rep = modefinder.ModeFinder(data + data[:2000], smooth_option="kernel")
+        for a, b in zip(fit.quantile(self.PROBS), rep.quantile(self.PROBS)):
+            self.assertAlmostEqual(a, b, delta=1e-3)
+        # the weights move with their points when the data are sorted
+        order = sorted(range(len(data)), key=lambda i: -data[i])
+        back = modefinder.ModeFinder([data[i] for i in order], smooth_option="kernel",
+                                     weights=[w[i] for i in order])
+        self.assertEqual(back.quantile(self.PROBS), fit.quantile(self.PROBS))
+
+    def test_weights_errors(self):
+        data = self.data[:1000]
+        for bad in ([1.0] * 999, [-1.0] + [1.0] * 999, [0.0] * 1000,
+                    [float("nan")] + [1.0] * 999):
+            with self.assertRaises(ValueError):
+                modefinder.ModeFinder(data, smooth_option="kernel", weights=bad)
+        with self.assertRaises(ValueError):
+            modefinder.ModeFinder(data, weights=[1.0] * 1000)        # Bernstein
+        with self.assertRaises(ValueError):
+            modefinder.emp_mode(data, smooth=False, weights=[1.0] * 1000)
+
     def test_shifted_data(self):
         # the kernel estimate is equivariant under affine maps of the data
         data = [10 * x - 3 for x in self.data[:20000]]

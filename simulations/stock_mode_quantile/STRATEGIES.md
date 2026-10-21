@@ -1,17 +1,24 @@
 # Newest strategies as CASE WHEN rules
 
-This file covers the strategies from the threshold study
-(`thresholds.py`, `results/run_20261019_top3_2000_thresholds`) and the
-stop-rules run (`stop_rules.py`, `results/run_20261019_top3_2000_stop_rules`).
-Each one is written as the decision taken at every bar.
+This file covers the three best strategies of the improvements run
+(`improvements.py`, `results/run_20261019_top3_2000_improvements`), out of
+its 300 combinations ranked by full-period return. Each one is written as
+the decision taken at every bar. Earlier strategies are in the reports of
+their runs.
 
 ## Common setup
 
 - **Fit:** at each 5-minute bar *t*, the last 1,560 bars (about 20 trading
   days) of the price field are fitted with
-  `modefinder.ModeFinder(..., smooth_option="kernel")`. Each price field
-  (high, open, close) is run on its own, and the results are the mean of the
-  three.
+  `modefinder.ModeFinder(..., smooth_option="kernel", weights=volume)`. Each
+  bar's volume, divided by the window's total volume, weights its gaussian
+  kernel. The bandwidth is the unweighted `bw.nrd0`.
+- **Price fields:** high, open and close are each run on their own, and the
+  results are the mean of the three.
+- **Bernstein mode filter:** it blocks some buys and signal sells. The mode
+  is fitted on the last 1,560 closes with the support fixed at
+  [lowest − 1/1560, highest + 1/1560]. The same filter is used for every
+  price field.
 - **Decision:** taken at the close of bar *t* and filled at the open of bar
   *t* + 1, all in or all out. Every buy or sell costs 2 bps. Each ticker
   starts with $10,000.
@@ -21,107 +28,72 @@ Each one is written as the decision taken at every bar.
 | name | meaning |
 |---|---|
 | `close_t` | close of bar *t* |
-| `q05_t`, `q25_t`, `q90_t`, `q95_t` | fitted quantiles of the last 1,560 bars |
 | `holding` | the strategy holds the ticker going into bar *t* |
-| `traded_bars` | bars since trading started (2026-05-13): *t* − start + 1 |
+| `wq25_t`, `wq99_t` | 25% and 99% quantiles of the volume-weighted kernel fit |
+| `max_prev_t` | highest value of the price field in the 1,560 bars before *t* (not counting *t*) |
+| `mode_t` | Bernstein mode of the last 1,560 closes |
+| `base_tim_all` | share of all bars since trading started (2026-05-13) in which the plain strategy held the ticker. The plain strategy buys below `wq25_t` and sells above the same threshold as the strategy (`max_prev_t` for 1, `wq99_t` for 2 and 3), with no other rule |
 
-## 1. Time in market over the last 20 days > 85%, entry only
+`base_tim_all` starts at 0, so the first buy signal is always taken.
 
-From the threshold study. The 85.3% threshold was chosen on the first half
-of the period (2026-05-13 to 2026-07-31). It is the 70th percentile of that
-half's values.
+## 1. Volume weights · sell above the 20-day max · trajectory guard
 
 ```sql
 CASE
-  WHEN holding     AND close_t > q90_t                     THEN 'SELL'
-  WHEN NOT holding AND close_t < q25_t
-                   AND base_tim_20d > 0.853                THEN 'BUY'
+  WHEN holding     AND close_t > max_prev_t
+                   AND NOT mode_rising                     THEN 'SELL'
+  WHEN NOT holding AND close_t < wq25_t
+                   AND base_tim_all < 0.5
+                   AND NOT mode_falling                    THEN 'BUY'
   ELSE 'KEEP'
 END
--- base_tim_20d = share of the last LEAST(1560, traded_bars) bars in which the
---                plain q25/q90 strategy (no rule) held the ticker
+-- mode_falling = mode_t < mode_{t-78} AND mode_{t-78} < mode_{t-156}
+--                (fell over each of the last two days, 78 bars a day)
+-- mode_rising  = mode_t > mode_{t-78} AND mode_{t-78} > mode_{t-156}
 ```
 
-- **What it picks:** tickers that the plain strategy has held for a long
-  time without reaching the 90% quantile, so the price has stayed low. The
-  strategy enters these only on a fresh dip below the 25% quantile.
-- **Entry vs exit:** selling when the rule stops holding gives the same
-  result. While this strategy holds, the plain one holds too, so
-  `base_tim_20d` only rises and the gate never closes during a holding.
-
-## 2. Time in market since start < 50%, entry only
-
-One of the requested thresholds in the threshold study.
+## 2. Volume weights · sell above q99 · trajectory guard
 
 ```sql
 CASE
-  WHEN holding     AND close_t > q90_t                     THEN 'SELL'
-  WHEN NOT holding AND close_t < q25_t
-                   AND base_tim_all < 0.5                  THEN 'BUY'
+  WHEN holding     AND close_t > wq99_t
+                   AND NOT mode_rising                     THEN 'SELL'
+  WHEN NOT holding AND close_t < wq25_t
+                   AND base_tim_all < 0.5
+                   AND NOT mode_falling                    THEN 'BUY'
   ELSE 'KEEP'
 END
--- base_tim_all = share of all bars since trading started in which the
---                plain q25/q90 strategy (no rule) held the ticker
+-- mode_falling, mode_rising as in 1
 ```
 
-- **First buy:** `base_tim_all` starts at 0, so the first buy signal is
-  always taken.
-- **Exit version:** also selling once `base_tim_all` reaches 50% did much
-  worse: +0.04% for the full period, in the market 19% of the time.
-
-## 3. q25/q90 + cap + stop
-
-From the stop-rules run. These are the rules of the new strategy below,
-applied to round 3's quantiles.
+## 3. Volume weights · sell above q99 · band, as written in the request
 
 ```sql
 CASE
-  WHEN holding AND close_t > q90_t                         THEN 'SELL'   -- signal
-  WHEN holding AND traded_bars >= 1560
-               AND own_tim_20d > 0.5                       THEN 'SELL'   -- cap
-  WHEN holding AND close_t < entry_price * 0.94            THEN 'SELL'   -- stop:
-                                                         -- stop_level = entry_price * 0.94
-  WHEN NOT holding AND close_t < q25_t
-               AND NOT (traded_bars >= 1560 AND own_tim_20d > 0.5)
-               AND (stop_level IS NULL OR close_t >= stop_level)
-                                                           THEN 'BUY'    -- entry_price = next open
+  WHEN holding     AND close_t > wq99_t
+                   AND NOT band_falling                    THEN 'SELL'
+  WHEN NOT holding AND close_t < wq25_t
+                   AND base_tim_all < 0.5
+                   AND NOT band_rising                     THEN 'BUY'
   ELSE 'KEEP'
 END
--- own_tim_20d = share of the last 1560 bars in which THIS strategy held the
---               ticker, counting the current bar
--- stop_level  = set by a stop sale; while flat, cleared once close_t >= stop_level
-```
-
-## 4. New strategy: q05/q95 + cap + stop
-
-The strategy requested on 2026-10-20 (see `PROMPT.md`). It is case 3 with
-`q25_t` replaced by `q05_t` and `q90_t` by `q95_t`.
-
-```sql
-CASE
-  WHEN holding AND close_t > q95_t                         THEN 'SELL'   -- signal
-  WHEN holding AND traded_bars >= 1560
-               AND own_tim_20d > 0.5                       THEN 'SELL'   -- cap
-  WHEN holding AND close_t < entry_price * 0.94            THEN 'SELL'   -- stop
-  WHEN NOT holding AND close_t < q05_t
-               AND NOT (traded_bars >= 1560 AND own_tim_20d > 0.5)
-               AND (stop_level IS NULL OR close_t >= stop_level)
-                                                           THEN 'BUY'
-  ELSE 'KEEP'
-END
+-- loo_modes    = at the close of the last full day before t, the Bernstein
+--                modes of the 1,560-close window refitted with each of its
+--                days (20 or 21) left out in turn
+-- band_falling = mode_t < QUANTILE(loo_modes, 0.10)
+-- band_rising  = mode_t > QUANTILE(loo_modes, 0.90)
 ```
 
 ## How they differ
 
-| | 1 | 2 | 3 | 4 |
-|---|---|---|---|---|
-| Buy / sell quantiles | q25 / q90 | q25 / q90 | q25 / q90 | q05 / q95 |
-| Whose time in market | plain round-3 strategy | plain round-3 strategy | its own | its own |
-| Window | last 20 days | since start | last 20 days | last 20 days |
-| Condition | > 85.3% | < 50% | must stay ≤ 50% | must stay ≤ 50% |
-| Effect | blocks buys | blocks buys | forces sales and blocks buys | forces sales and blocks buys |
-| Stop loss | no | no | 6% below buy price | 6% below buy price |
-| Threshold | chosen on the first half | requested | requested | requested |
+| | 1 | 2 | 3 |
+|---|---|---|---|
+| Buy | below `wq25_t` | below `wq25_t` | below `wq25_t` |
+| Sell | above the 20-day max | above `wq99_t` | above `wq99_t` |
+| Gate | `base_tim_all < 0.5` | `base_tim_all < 0.5` | `base_tim_all < 0.5` |
+| Mode filter | two-day trajectory | two-day trajectory | leave-one-day-out band |
+| Blocks while the mode falls | buys | buys | sells |
+| Blocks while the mode rises | sells | sells | buys |
 
 ## Results
 
@@ -129,26 +101,24 @@ These are for the 2,000 tickers of round 3. The period is 109 trading days,
 2026-05-13 to 2026-10-16. Returns are totals over that period, not
 annualized. The portfolio splits $10,000 equally across the tickers and the
 three price fields. The second half starts at the close of 2026-07-31.
+Round 3 and buy and hold are shown for reference.
 
-| strategy | return | Sharpe | max drawdown | 2nd half return | in market | trades per ticker |
-|---|---|---|---|---|---|---|
-| 1. Time in market over the last 20 days > 85%, entry only | 0.92% | 0.49 | −2.0% | **+0.62%** | 26% | 3.1 |
-| 2. Time in market since start < 50%, entry only | **1.26%** | **0.50** | −2.5% | −0.30% | 40% | 4.9 |
-| 3. q25/q90 + cap + stop | 0.78% | 0.40 | −3.0% | −1.62% | 35% | 14.9 |
-| 4. q05/q95 + cap + stop (new) | 0.35% | 0.22 | −2.5% | −1.47% | 29% | 10.0 |
-| Round 3: q25/q90, no rule | 0.34% | 0.14 | −4.7% | −1.85% | 58% | 7.1 |
-| Buy and hold | −0.64% | −0.06 | −6.6% | −2.14% | 100% | 1.0 |
+| strategy | return | Sharpe | max drawdown | 2nd half return | tickers profitable | in market | trades per ticker |
+|---|---|---|---|---|---|---|---|
+| 1. volume weights · sell above 20-day max · trajectory guard | **2.55%** | **0.92** | −2.4% | +0.60% | 61% | 45% | 3.5 |
+| 2. volume weights · sell above q99 · trajectory guard | 2.51% | 0.91 | −2.4% | **+0.66%** | 61% | 44% | 3.6 |
+| 3. volume weights · sell above q99 · band, as written | 2.48% | **0.92** | −2.3% | +0.57% | 60% | 43% | 3.7 |
+| Round 3: q25/q90, kernel, no rule | 0.34% | 0.14 | −4.7% | −1.85% | 53% | 58% | 7.1 |
+| Buy and hold | −0.64% | −0.06 | −6.6% | −2.14% | 46% | 100% | 1.0 |
 
-- **All four beat round 3** on return, Sharpe and drawdown. The new
-  strategy's lead on return is only 0.01 points. Part of the gain comes from
-  holding more cash while the market fell in the second half.
-- **Strategies 1 and 2 point in opposite directions:** one needs high time
-  in market and the other low.
-- **Strategy 1 is weak evidence:** its threshold was fitted on the first
-  half. At the ticker level, the tickers passing it did worse over the next
-  20 days in the second half (−2.10% vs −1.10%).
-- **Only 3 and 4 were set before the run.** Even so, the 6% stop and the
-  50% cap were chosen after seeing round 3 on the same tickers and period.
-  None of the four is an out-of-sample test.
+- **The higher sell threshold accounts for most of the gain.** With the
+  unweighted kernel and no filter, the same gate selling above q90 returns
+  1.26%, and selling above q99 returns 2.13%.
+- **Volume weights add about 0.3 points:** 2.44% at q99 with no filter.
+- **The mode filter adds about 0.1 points or less.** Strategies 1–2 and
+  strategy 3 apply it in opposite directions and score about the same.
+- **Not an out-of-sample test:** these are the best of 300 combinations on
+  one period and the same tickers. Part of the gain also comes from holding
+  more cash while the market fell in the second half.
 
-The full tables are in each run's `report.md`.
+The full tables are in the run's `report.md`.

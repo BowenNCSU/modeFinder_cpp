@@ -1,7 +1,7 @@
 /*
  * Kernel density estimate: a C port of R's stats::density() for the
  * arguments modeFinder uses (gaussian kernel, bw = "nrd0", adjust = 1,
- * cut = 3, ext = 4, old.coords = FALSE, no weights).  The steps mirror
+ * cut = 3, ext = 4, old.coords = FALSE, optional weights).  The steps mirror
  * density.default() in R's src/library/stats/R/density.R, including the
  * linear binning of BinDist() (massdist.c), the FFT convolution and the
  * final linear interpolation of approx().
@@ -141,7 +141,7 @@ static double approx1(double v, const double *x, const double *y, int n)
     return y[i] + (y[j] - y[i]) * ((v - x[i]) / (x[j] - x[i]));
 }
 
-int mf_density(const double *x, int nx, int n_out,
+int mf_density(const double *x, const double *wts, int nx, int n_out,
 	       double *out_x, double *out_y, mf_kde_bins *bins)
 {
     int n = 512, len, i, ix;
@@ -164,11 +164,12 @@ int mf_density(const double *x, int nx, int n_out,
     lo = from - 4 * bw;
     up = to + 4 * bw;
 
-    /* y <- BinDist(x, weights = rep(1/nx, nx), lo, up, n) */
+    /* y <- BinDist(x, weights, lo, up, n), weights = rep(1/nx, nx) by default */
     for (i = 0; i < len; i++) yr[i] = yi[i] = ki[i] = 0.;
     xdelta = (up - lo) / (n - 1);
     wi = 1. / nx;
     for (i = 0; i < nx; i++) {
+	if (wts) wi = wts[i];
 	xpos = (x[i] - lo) / xdelta;
 	if (xpos > INT_MAX || xpos < INT_MIN) continue;
 	ix = (int) floor(xpos);
