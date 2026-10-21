@@ -3,8 +3,11 @@
 This file covers the three best strategies of the improvements run
 (`improvements.py`, `results/run_20261019_top3_2000_improvements`), out of
 its 300 combinations ranked by full-period return. Each one is written as
-the decision taken at every bar. Earlier strategies are in the reports of
-their runs.
+the decision taken at every bar. Every variant tried so far, these three
+included, is in the strategy pool (`strategy_pool.py`, `strategy_pool.csv`).
+Their ids are `kernel_vol/q25/max/timall/traj_guard`,
+`kernel_vol/q25/q99/timall/traj_guard` and
+`kernel_vol/q25/q99/timall/band_literal`.
 
 ## Common setup
 

@@ -37,6 +37,15 @@ tickers by profit.
   2 GB for 2,000 tickers and ignored by git.
 - `STRATEGIES.md` writes the newest strategies as CASE WHEN rules and
   compares their results.
+- `strategy_pool.py` keeps every strategy variant tried so far (from round 2's
+  rules on) in one pool, and runs any of them on any ticker. A variant is
+  named `fit/buy/sell/rule/filter`, for example
+  `kernel_vol/q25/q99/timall/traj_guard`. Any other combination of those parts
+  runs too. Fits are cached in `cache/pool` here, which git ignores.
+- `strategy_pool.csv` lists the pool's 312 variants:
+  - each variant's parts and description, and whether it is one of the top 3;
+  - its results on round 3's 2,000 tickers, for the 305 variants that were
+    run there. The 7 other round 2 rules were only run on round 2's tickers.
 - `improvements.py` reruns a finished run's tickers over 300 variants:
   three fits (kernel, kernel weighted by bar volume, and Bernstein with
   bounds at the window's min and max ± 1/1560), four sell thresholds (q90,
@@ -74,6 +83,26 @@ python simulations/stock_mode_quantile/simulate.py \
   - `--cost-bps`, `--seed` and `--jobs`.
 - **Rebuilding the report:**
   `python simulations/stock_mode_quantile/report.py <run dir>`.
+
+### The strategy pool
+
+``` sh
+cd simulations/stock_mode_quantile
+python strategy_pool.py --list --limit 20                 # best on round 3's tickers
+python strategy_pool.py VOO AMZN                          # the top 3 on two tickers
+python strategy_pool.py META --variants all --out meta.csv
+python strategy_pool.py SPY --variants round2 'kernel/q25/*/timall/none'
+```
+
+- **`--variants`:** takes any mix of `top3`, `all`, a group (`round2`,
+  `stop_rules`, `improvements`), variant ids, and glob patterns over the
+  pool. Runs on tickers default to `top3`, and `--list` shows the whole pool.
+- **Tickers:** each is looked up as `<ticker>.us.txt` under round 3's data
+  root, or you can pass the file's path.
+- **First run on a ticker:** it takes about a minute.
+- **Checks:** on VOO and AMZN, the pool reproduces the improvements run's
+  300 variants and the stop-rules run's results exactly.
+- **From Python:** `strategy_pool.run_tickers(["VOO"], strategy_pool.TOP3)`.
 
 ## Runs
 
